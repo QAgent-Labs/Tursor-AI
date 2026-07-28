@@ -1,0 +1,10 @@
+{
+  "name": "tursor-ai-cli",
+  "version": "0.0.1",
+  "bin": {
+    "tursorAI": "bin/cli.js"
+  },
+  "description": "CLI to start, stop, and probe the local Tursor-AI embeddings service",
+  "private": true,
+  "license": "UNLICENSED"
+}
