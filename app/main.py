@@ -35,6 +35,7 @@ def validate_config(
         directory_path=str(cfg.workspace_root),
         config_path=str(cfg.config_path),
         excluded=sorted(cfg.excluded),
+        include_patterns=sorted(cfg.include_patterns),
     )
 
 

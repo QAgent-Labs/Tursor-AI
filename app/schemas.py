@@ -16,6 +16,11 @@ class EmbedResponse(BaseModel):
     files_indexed: int
     chunks_indexed: int
     model: str
+    files_added: int = 0
+    files_updated: int = 0
+    files_removed: int = 0
+    files_unchanged: int = 0
+    incremental: bool = False
 
 
 class ValidateResponse(BaseModel):
@@ -23,6 +28,7 @@ class ValidateResponse(BaseModel):
     directory_path: str
     config_path: str | None = None
     excluded: list[str] = Field(default_factory=list)
+    include_patterns: list[str] = Field(default_factory=list)
     error: str | None = None
 
 

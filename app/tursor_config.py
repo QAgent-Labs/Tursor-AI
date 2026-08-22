@@ -1,5 +1,6 @@
 import json
 from dataclasses import dataclass
+from fnmatch import fnmatch
 from pathlib import Path
 
 TURSOR_DIR = ".tursor"
@@ -11,6 +12,7 @@ EMBEDDINGS_DIR = "embeddings"
 class TursorWorkspaceConfig:
     workspace_root: Path
     excluded: frozenset[str]
+    include_patterns: frozenset[str]
 
     @property
     def tursor_dir(self) -> Path:
@@ -27,6 +29,17 @@ class TursorWorkspaceConfig:
 
 class TursorConfigError(Exception):
     pass
+
+
+def _normalize_rel_path(rel: str) -> str:
+    return rel.replace("\\", "/")
+
+
+def path_matches_include(relative_path: str, patterns: frozenset[str]) -> bool:
+    if not patterns:
+        return True
+    normalized = _normalize_rel_path(relative_path)
+    return any(fnmatch(normalized, pattern) for pattern in patterns)
 
 
 def load_tursor_config(workspace_root: Path) -> TursorWorkspaceConfig:
@@ -62,4 +75,24 @@ def load_tursor_config(workspace_root: Path) -> TursorWorkspaceConfig:
             )
         excluded.add(item.strip())
 
-    return TursorWorkspaceConfig(workspace_root=root, excluded=frozenset(excluded))
+    include_patterns: set[str] = set()
+    include_raw = raw.get("include")
+    if include_raw is not None:
+        if not isinstance(include_raw, dict):
+            raise TursorConfigError('"include" must be an object')
+        patterns_raw = include_raw.get("patterns")
+        if patterns_raw is not None:
+            if not isinstance(patterns_raw, list):
+                raise TursorConfigError('"include.patterns" must be an array of strings')
+            for item in patterns_raw:
+                if not isinstance(item, str) or not item.strip():
+                    raise TursorConfigError(
+                        '"include.patterns" entries must be non-empty strings',
+                    )
+                include_patterns.add(item.strip())
+
+    return TursorWorkspaceConfig(
+        workspace_root=root,
+        excluded=frozenset(excluded),
+        include_patterns=frozenset(include_patterns),
+    )

@@ -39,3 +39,7 @@ python run.py
 - `POST /v1/embed` with body `{ "directory_path": "/abs/path/to/repo" }`
 
 Embeddings are written to `{directory_path}/.tursor/embeddings/manifest.json` and `chunks.jsonl`.
+
+Re-running `/v1/embed` performs an **incremental update**: unchanged files reuse existing vectors; added/changed/deleted files are merged automatically.
+
+Optional `include.patterns` in config (e.g. `["src/**"]`) limits which files are indexed. Without it, all supported text extensions under the workspace are indexed minus `excluded`.

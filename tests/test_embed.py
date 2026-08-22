@@ -40,6 +40,39 @@ def test_embed_writes_artifacts(tmp_path: Path) -> None:
     assert cfg.excluded == frozenset({"node_modules", "dist"})
 
 
+def test_embed_honors_include_patterns(tmp_path: Path) -> None:
+    tursor = tmp_path / ".tursor"
+    tursor.mkdir()
+    (tursor / "config.json").write_text(
+        '{"include": {"patterns": ["src/**"]}}',
+        encoding="utf-8",
+    )
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "app.ts").write_text("export const ok = true;\n")
+    (tmp_path / "root.ts").write_text("export const skip = true;\n")
+
+    result = build_embeddings(str(tmp_path))
+    assert result.files_indexed == 1
+
+
+def test_embed_incremental_reuses_unchanged_files(tmp_path: Path) -> None:
+    tursor = tmp_path / ".tursor"
+    tursor.mkdir()
+    (tursor / "config.json").write_text('{"excluded": []}', encoding="utf-8")
+    (tmp_path / "a.ts").write_text("export const a = 1;\n")
+    (tmp_path / "b.ts").write_text("export const b = 1;\n")
+
+    first = build_embeddings(str(tmp_path))
+    assert first.files_indexed == 2
+    assert first.files_unchanged == 0
+
+    (tmp_path / "b.ts").write_text("export const b = 2;\n")
+    second = build_embeddings(str(tmp_path))
+    assert second.incremental is True
+    assert second.files_updated == 1
+    assert second.files_unchanged == 1
+
+
 def test_http_validate_and_embed(tmp_path: Path) -> None:
     tursor = tmp_path / ".tursor"
     tursor.mkdir()
