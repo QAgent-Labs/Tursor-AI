@@ -53,16 +53,15 @@ const WORDMARK = [
   '   ╚═╝    ╚═════╝ ╚═╝  ╚═╝╚══════╝ ╚═════╝ ╚═╝  ╚═╝',
 ].map((line) => line.padEnd(WORDMARK_WIDTH, ' '));
 
-/** RGB stops for left → right gradient (brand: violet → cyan → green). */
+/** RGB stops for left → right gradient (reversed vs backend CLI: green → cyan → violet). */
 const GRADIENT_STOPS = [
-  [139, 92, 246],
-  [56, 189, 248],
   [34, 197, 94],
+  [56, 189, 248],
+  [139, 92, 246],
 ];
 
-/** Wordmark + frame: mix brand colors toward white (full opacity, pastel tint). */
+/** Wordmark: mix brand colors toward white (full opacity, pastel tint). */
 const WORDMARK_LIGHTEN = 0.7;
-const BRAND_CYAN = [56, 189, 248];
 
 /**
  * @param {[number, number, number]} rgb
@@ -185,59 +184,21 @@ function paintWordmarkLine(line, row, colors) {
 }
 
 /**
- * @param {string} line
- * @param {AnsiPalette} colors
- */
-function paintBorder(line, colors) {
-  if (!colors.cyan) {
-    return line;
-  }
-  const [r, g, b] = lightenTowardWhite(BRAND_CYAN, WORDMARK_LIGHTEN);
-  if (supportsTrueColor()) {
-    return `\x1b[2;38;2;${r};${g};${b}m${line}\x1b[0m`;
-  }
-  const code = rgbTo256(r, g, b);
-  return `\x1b[2;38;5;${code}m${line}\x1b[0m`;
-}
-
-/**
- * Figlet wordmark with gradient color inside a frame.
+ * Gradient figlet wordmark (no frame) — matches backend CLI layout.
  * @param {{ subtitle?: string }} [opts]
  */
 function printBanner(opts = {}) {
   const colors = c(useColor());
   const subtitle = opts.subtitle ?? 'Embeddings service · Tursor AI CLI';
-  const innerW = Math.max(
-    subtitle.length + 2,
-    `v${VERSION}`.length + 2,
-    WORDMARK_WIDTH,
-  );
-  /** @param {string} text */
-  const pad = (text) => text.padEnd(innerW, ' ');
-  const empty = ' '.repeat(innerW);
-
-  const top = `╭${'─'.repeat(innerW + 2)}╮`;
-  const bottom = `╰${'─'.repeat(innerW + 2)}╯`;
-  /** @param {string} content */
-  const mid = (content) => `│ ${pad(content)} │`;
 
   console.log('');
-  console.log(paintBorder(top, colors));
-  console.log(paintBorder(mid(empty), colors));
   WORDMARK.forEach((row, i) => {
-    const text = pad(row.slice(0, innerW));
-    console.log(
-      `${paintBorder('│ ', colors)}${paintWordmarkLine(text, i, colors)}${paintBorder(' │', colors)}`,
-    );
+    console.log(paintWordmarkLine(row, i, colors));
   });
-  console.log(paintBorder(mid(empty), colors));
   console.log(
-    `${paintBorder('│ ', colors)}${colors.bright}${colors.bold}${pad(subtitle)}${colors.reset}${paintBorder(' │', colors)}`,
+    `${colors.bright}${colors.bold}${subtitle}${colors.reset}`,
   );
-  console.log(
-    `${paintBorder('│ ', colors)}${colors.dim}${pad(`v${VERSION}`)}${colors.reset}${paintBorder(' │', colors)}`,
-  );
-  console.log(paintBorder(bottom, colors));
+  console.log(`${colors.dim}v${VERSION}${colors.reset}`);
   console.log('');
 }
 

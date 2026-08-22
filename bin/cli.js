@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const {
@@ -42,6 +42,15 @@ function venvPython(aiHome) {
   return null;
 }
 
+function pythonVersionOk(python) {
+  const result = spawnSync(
+    python,
+    ['-c', 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)'],
+    { encoding: 'utf8' },
+  );
+  return result.status === 0;
+}
+
 switch (command) {
   case 'start': {
     void (async () => {
@@ -64,6 +73,13 @@ switch (command) {
       if (!python) {
         printError(
           `Python venv missing under ${aiHome}. Run the Tursor install script first.`,
+        );
+        process.exit(1);
+        return;
+      }
+      if (!pythonVersionOk(python)) {
+        printError(
+          'Tursor-AI requires Python 3.10+ in ~/.tursor-ai/.venv. Re-run Tursor install to recreate the venv.',
         );
         process.exit(1);
         return;
@@ -93,7 +109,7 @@ switch (command) {
       fs.writeFileSync(PID_FILE, String(child.pid));
 
       printInfo(`Waiting for health on port ${hintPort}…`);
-      const status = await pollHealthUntilUp(hintPort);
+      const status = await pollHealthUntilUp(hintPort, 120_000);
       if (status.running && status.port) {
         writeRuntime({ port: status.port, pid: child.pid });
         printSuccess(`Tursor-AI running (PID ${child.pid})`);
@@ -102,11 +118,21 @@ switch (command) {
         process.exit(0);
         return;
       }
-      printWarn(
-        `Process started (PID ${child.pid}) but /health did not respond in time.`,
+      try {
+        process.kill(child.pid);
+      } catch {
+        /* process may already be gone */
+      }
+      try {
+        fs.unlinkSync(PID_FILE);
+      } catch {
+        /* ignore */
+      }
+      clearRuntime();
+      printError(
+        `Tursor-AI failed to become healthy on port ${hintPort}. Check ~/.tursor-ai/.install-start.log`,
       );
-      printInfo('Run `tursorAI port` after a few seconds to resolve the port.');
-      process.exit(0);
+      process.exit(1);
     })();
 
     break;
