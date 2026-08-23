@@ -29,6 +29,8 @@ class ValidateResponse(BaseModel):
     config_path: str | None = None
     excluded: list[str] = Field(default_factory=list)
     include_patterns: list[str] = Field(default_factory=list)
+    generation_model: str | None = None
+    ai_configured: bool = False
     error: str | None = None
 
 

@@ -9,10 +9,17 @@ EMBEDDINGS_DIR = "embeddings"
 
 
 @dataclass(frozen=True)
+class TursorAiConfig:
+    generation_model: str
+    api_key: str
+
+
+@dataclass(frozen=True)
 class TursorWorkspaceConfig:
     workspace_root: Path
     excluded: frozenset[str]
     include_patterns: frozenset[str]
+    ai: TursorAiConfig | None = None
 
     @property
     def tursor_dir(self) -> Path:
@@ -91,8 +98,27 @@ def load_tursor_config(workspace_root: Path) -> TursorWorkspaceConfig:
                     )
                 include_patterns.add(item.strip())
 
+    ai_config: TursorAiConfig | None = None
+    ai_raw = raw.get("ai")
+    if ai_raw is not None:
+        if not isinstance(ai_raw, dict):
+            raise TursorConfigError('"ai" must be an object')
+        model_raw = ai_raw.get("generationModel")
+        if not isinstance(model_raw, str) or not model_raw.strip():
+            raise TursorConfigError(
+                '"ai.generationModel" must be a non-empty string',
+            )
+        key_raw = ai_raw.get("apiKey")
+        if not isinstance(key_raw, str) or not key_raw.strip():
+            raise TursorConfigError('"ai.apiKey" must be a non-empty string')
+        ai_config = TursorAiConfig(
+            generation_model=model_raw.strip(),
+            api_key=key_raw.strip(),
+        )
+
     return TursorWorkspaceConfig(
         workspace_root=root,
         excluded=frozenset(excluded),
         include_patterns=frozenset(include_patterns),
+        ai=ai_config,
     )

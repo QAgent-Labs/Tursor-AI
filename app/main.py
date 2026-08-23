@@ -36,6 +36,8 @@ def validate_config(
         config_path=str(cfg.config_path),
         excluded=sorted(cfg.excluded),
         include_patterns=sorted(cfg.include_patterns),
+        generation_model=cfg.ai.generation_model if cfg.ai else None,
+        ai_configured=cfg.ai is not None,
     )
 
 

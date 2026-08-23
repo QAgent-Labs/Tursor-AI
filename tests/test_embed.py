@@ -73,6 +73,28 @@ def test_embed_incremental_reuses_unchanged_files(tmp_path: Path) -> None:
     assert second.files_unchanged == 1
 
 
+def test_validate_ai_config(tmp_path: Path) -> None:
+    tursor = tmp_path / ".tursor"
+    tursor.mkdir()
+    (tursor / "config.json").write_text(
+        """
+        {
+          "include": {"patterns": ["src/**"]},
+          "ai": {
+            "generationModel": "gpt-5.6",
+            "apiKey": "sk-test-key"
+          }
+        }
+        """.strip(),
+        encoding="utf-8",
+    )
+
+    cfg = validate_workspace(str(tmp_path))
+    assert cfg.ai is not None
+    assert cfg.ai.generation_model == "gpt-5.6"
+    assert cfg.ai.api_key == "sk-test-key"
+
+
 def test_http_validate_and_embed(tmp_path: Path) -> None:
     tursor = tmp_path / ".tursor"
     tursor.mkdir()
