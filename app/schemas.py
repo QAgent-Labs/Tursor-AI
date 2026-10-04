@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -38,3 +40,53 @@ class HealthResponse(BaseModel):
     status: str = "ok"
     service: str = "tursor-ai"
     port: int = 8000
+
+
+class RagSearchRequest(BaseModel):
+    directory_path: str = Field(..., min_length=1)
+    query: str = Field(..., min_length=1)
+    top_k: int = Field(default=8, ge=1, le=30)
+
+
+class RagChunkResult(BaseModel):
+    path: str
+    content: str
+    start_line: int
+    end_line: int
+    score: float
+
+
+class RagSearchResponse(BaseModel):
+    ok: bool = True
+    directory_path: str
+    query: str
+    chunks: list[RagChunkResult] = Field(default_factory=list)
+
+
+class PlanRef(BaseModel):
+    id: str
+    title: str = ""
+
+
+class CdpStep(BaseModel):
+    id: str
+    label: str
+    actions: list[dict]
+
+
+class ChatCompletionRequest(BaseModel):
+    workspace_path: str = Field(..., min_length=1)
+    message: str = Field(..., min_length=1)
+    generation_model: str = Field(..., min_length=1)
+    api_key: str = Field(..., min_length=1)
+    mode: Literal["chat", "intro"] = "chat"
+    case: str = ""
+    plans: list[PlanRef] = Field(default_factory=list)
+    latest_cdp_steps: list[CdpStep] | None = None
+
+
+class ChatCompletionResponse(BaseModel):
+    reply: str
+    case: str = ""
+    cdp_steps: list[CdpStep] | None = None
+    retrieved_chunk_count: int = 0

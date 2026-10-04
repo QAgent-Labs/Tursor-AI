@@ -1,0 +1,51 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+from app.llm_service import LlmError, complete_chat
+from app.rag_service import ensure_embeddings_exist, search_workspace
+from app.tursor_config import load_tursor_config
+
+
+async def run_chat_completion(
+    *,
+    workspace_path: str,
+    message: str,
+    generation_model: str,
+    api_key: str,
+    mode: str = "chat",
+    case: str = "",
+    plans: list[dict[str, str]] | None = None,
+    latest_cdp_steps: list[dict[str, Any]] | None = None,
+    rag_top_k: int = 8,
+) -> dict[str, Any]:
+    cfg = load_tursor_config(Path(workspace_path))
+    ensure_embeddings_exist(cfg)
+
+    query = message.strip() if mode != "intro" else "application routes pages"
+    retrieved = search_workspace(workspace_path, query, top_k=rag_top_k) if query else []
+
+    try:
+        ai_response = await complete_chat(
+            generation_model=generation_model,
+            api_key=api_key,
+            mode=mode,
+            message=message,
+            case=case,
+            plans=plans,
+            latest_cdp_steps=latest_cdp_steps,
+            retrieved_context=retrieved,
+        )
+    except LlmError as exc:
+        return {
+            "reply": str(exc),
+            "case": case,
+            "cdp_steps": None,
+            "retrieved_chunk_count": len(retrieved),
+        }
+
+    return {
+        **ai_response,
+        "retrieved_chunk_count": len(retrieved),
+    }
