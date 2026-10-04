@@ -86,28 +86,43 @@ def _mock_login_steps() -> list[dict[str, Any]]:
     ]
 
 
-def _mock_response(mode: str, message: str, case: str) -> dict[str, Any]:
+def _mock_response(
+    mode: str,
+    message: str,
+    case: str,
+    brief_summary: str,
+) -> dict[str, Any]:
     if mode == "intro":
         return {
             "reply": (
-                "I can explain this codebase and create CDP steps when you want to test a flow. "
-                "Ask how something works, or tell me to create the steps."
+                "I can explain this codebase and create CDP steps when you want to test a flow.\n"
+                "\n"
+                "- Ask how something works\n"
+                "- Or tell me to ##create the steps##"
             ),
             "case": "No requirement yet.",
+            "brief_summary": "No requirement yet.",
             "cdp_steps": None,
         }
     if _wants_cdp_steps(message):
         return {
-            "reply": "Created CDP steps for the login flow. Use Run Test when you want to execute them.",
-            "case": case or "User asked for CDP steps for the login flow.",
+            "reply": (
+                "Created CDP steps for the ##login flow##.\n"
+                "\n"
+                "- Use *Run Test* when you want to execute them"
+            ),
+            "case": case or "- User asked for CDP steps for the ##login flow##.",
+            "brief_summary": brief_summary or "Login flow CDP steps were created.",
             "cdp_steps": _mock_login_steps(),
         }
+    gist = brief_summary or (case or message[:160]).replace("\n", " ")
     return {
         "reply": (
             f"(Mock LLM) {message[:300]}. "
             "Say yes or ask me to create the CDP steps when you want a runnable plan."
         ),
         "case": case or message[:300],
+        "brief_summary": gist[:180],
         "cdp_steps": None,
     }
 
@@ -117,15 +132,21 @@ def _build_user_payload(
     mode: str,
     message: str,
     case: str,
+    brief_summary: str,
     plans: list[dict[str, str]],
+    cdp_runs: list[dict[str, str]],
     latest_cdp_steps: list[dict[str, Any]] | None,
     retrieved_context: list[dict[str, Any]],
 ) -> str:
     parts: list[str] = []
     if case.strip():
         parts.append(f"case:\n{case.strip()}")
+    if brief_summary.strip():
+        parts.append(f"brief_summary:\n{brief_summary.strip()}")
     if plans:
         parts.append(f"plans:\n{json.dumps(plans, indent=2)}")
+    if cdp_runs:
+        parts.append(f"cdp_runs:\n{json.dumps(cdp_runs, indent=2)}")
     if latest_cdp_steps:
         parts.append(f"latest_cdp_steps:\n{json.dumps(latest_cdp_steps, indent=2)}")
     if retrieved_context:
@@ -182,9 +203,11 @@ def _parse_json_response(raw: str) -> dict[str, Any]:
     if not isinstance(reply, str) or not reply.strip():
         raise LlmError("LLM JSON must include a reply string")
     case = data.get("case") if isinstance(data.get("case"), str) else ""
+    brief = data.get("brief_summary") if isinstance(data.get("brief_summary"), str) else ""
     return {
         "reply": reply.strip(),
         "case": case.strip(),
+        "brief_summary": brief.strip(),
         "cdp_steps": _normalize_steps(data.get("cdp_steps")),
     }
 
@@ -196,19 +219,23 @@ async def complete_chat(
     mode: str,
     message: str,
     case: str = "",
+    brief_summary: str = "",
     plans: list[dict[str, str]] | None = None,
+    cdp_runs: list[dict[str, str]] | None = None,
     latest_cdp_steps: list[dict[str, Any]] | None = None,
     retrieved_context: list[dict[str, Any]] | None = None,
     openai_base_url: str = "https://api.openai.com/v1",
 ) -> dict[str, Any]:
     if os.environ.get("TURSOR_AI_MOCK_LLM", "").strip() in ("1", "true", "yes"):
-        return _mock_response(mode, message, case)
+        return _mock_response(mode, message, case, brief_summary)
 
     user_content = _build_user_payload(
         mode=mode,
         message=message,
         case=case,
+        brief_summary=brief_summary,
         plans=plans or [],
+        cdp_runs=cdp_runs or [],
         latest_cdp_steps=latest_cdp_steps,
         retrieved_context=retrieved_context or [],
     )

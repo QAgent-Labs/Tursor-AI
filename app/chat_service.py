@@ -16,7 +16,9 @@ async def run_chat_completion(
     api_key: str,
     mode: str = "chat",
     case: str = "",
+    brief_summary: str = "",
     plans: list[dict[str, str]] | None = None,
+    cdp_runs: list[dict[str, str]] | None = None,
     latest_cdp_steps: list[dict[str, Any]] | None = None,
     rag_top_k: int = 8,
 ) -> dict[str, Any]:
@@ -33,7 +35,9 @@ async def run_chat_completion(
             mode=mode,
             message=message,
             case=case,
+            brief_summary=brief_summary,
             plans=plans,
+            cdp_runs=cdp_runs,
             latest_cdp_steps=latest_cdp_steps,
             retrieved_context=retrieved,
         )
@@ -41,6 +45,7 @@ async def run_chat_completion(
         return {
             "reply": str(exc),
             "case": case,
+            "brief_summary": brief_summary,
             "cdp_steps": None,
             "retrieved_chunk_count": len(retrieved),
         }

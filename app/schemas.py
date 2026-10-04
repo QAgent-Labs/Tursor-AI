@@ -68,6 +68,12 @@ class PlanRef(BaseModel):
     title: str = ""
 
 
+class CdpRunRef(BaseModel):
+    cdp_step_id: str
+    status: Literal["passed", "failure"]
+    status_message: str = ""
+
+
 class CdpStep(BaseModel):
     id: str
     label: str
@@ -81,12 +87,15 @@ class ChatCompletionRequest(BaseModel):
     api_key: str = Field(..., min_length=1)
     mode: Literal["chat", "intro"] = "chat"
     case: str = ""
+    brief_summary: str = ""
     plans: list[PlanRef] = Field(default_factory=list)
+    cdp_runs: list[CdpRunRef] = Field(default_factory=list)
     latest_cdp_steps: list[CdpStep] | None = None
 
 
 class ChatCompletionResponse(BaseModel):
     reply: str
     case: str = ""
+    brief_summary: str = ""
     cdp_steps: list[CdpStep] | None = None
     retrieved_chunk_count: int = 0

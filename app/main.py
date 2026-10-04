@@ -113,7 +113,9 @@ async def chat_completion(body: ChatCompletionRequest) -> ChatCompletionResponse
             api_key=body.api_key,
             mode=body.mode,
             case=body.case,
+            brief_summary=body.brief_summary,
             plans=[plan.model_dump() for plan in body.plans],
+            cdp_runs=[run.model_dump() for run in body.cdp_runs],
             latest_cdp_steps=latest,
         )
     except TursorConfigError as exc:
@@ -137,6 +139,7 @@ async def chat_completion(body: ChatCompletionRequest) -> ChatCompletionResponse
     return ChatCompletionResponse(
         reply=str(result.get("reply") or ""),
         case=str(result.get("case") or ""),
+        brief_summary=str(result.get("brief_summary") or ""),
         cdp_steps=steps or None,
         retrieved_chunk_count=int(result.get("retrieved_chunk_count", 0)),
     )
