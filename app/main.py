@@ -1,3 +1,5 @@
+import uuid
+
 from fastapi import FastAPI, HTTPException, Query
 
 from app.chat_service import run_chat_completion
@@ -13,6 +15,8 @@ from app.schemas import (
     RagChunkResult,
     RagSearchRequest,
     RagSearchResponse,
+    SuiteCase,
+    TestSuite,
     ValidateResponse,
 )
 from app.settings import settings
@@ -99,11 +103,55 @@ def rag_search(body: RagSearchRequest) -> RagSearchResponse:
     )
 
 
+def _suite_from_result(raw: object) -> TestSuite | None:
+    if not isinstance(raw, dict):
+        return None
+    feature = raw.get("feature")
+    cases = raw.get("cases")
+    if not isinstance(feature, str) or not feature.strip() or not isinstance(cases, list):
+        return None
+    parsed: list[SuiteCase] = []
+    for item in cases:
+        if not isinstance(item, dict):
+            continue
+        kind = item.get("kind")
+        if kind not in {"success", "failure", "edge"}:
+            continue
+        steps_raw = item.get("steps")
+        if not isinstance(steps_raw, list) or not steps_raw:
+            continue
+        steps = [
+            CdpStep(
+                id=str(step["id"]),
+                label=str(step["label"]),
+                actions=list(step["actions"]),
+            )
+            for step in steps_raw
+            if isinstance(step, dict)
+        ]
+        if not steps:
+            continue
+        title = item.get("title")
+        explanation = item.get("explanation")
+        parsed.append(
+            SuiteCase(
+                kind=kind,
+                title=title.strip() if isinstance(title, str) and title.strip() else "Test case",
+                explanation=explanation.strip() if isinstance(explanation, str) else "",
+                steps=steps,
+            )
+        )
+    if not parsed:
+        return None
+    return TestSuite(feature=feature.strip(), cases=parsed)
+
+
 @app.post("/v1/chat/completion", response_model=ChatCompletionResponse)
 async def chat_completion(body: ChatCompletionRequest) -> ChatCompletionResponse:
     latest = None
     if body.latest_cdp_steps:
         latest = [step.model_dump() for step in body.latest_cdp_steps]
+    latest_suite = body.latest_test_suite.model_dump() if body.latest_test_suite else None
 
     try:
         result = await run_chat_completion(
@@ -117,29 +165,19 @@ async def chat_completion(body: ChatCompletionRequest) -> ChatCompletionResponse
             plans=[plan.model_dump() for plan in body.plans],
             cdp_runs=[run.model_dump() for run in body.cdp_runs],
             latest_cdp_steps=latest,
+            latest_test_suite=latest_suite,
         )
     except TursorConfigError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    steps = None
-    raw_steps = result.get("cdp_steps")
-    if isinstance(raw_steps, list) and raw_steps:
-        steps = [
-            CdpStep(
-                id=str(step["id"]),
-                label=str(step["label"]),
-                actions=list(step["actions"]),
-            )
-            for step in raw_steps
-            if isinstance(step, dict)
-        ]
-
     return ChatCompletionResponse(
+        conversation_id=body.conversation_id,
+        response_id=str(uuid.uuid4()),
         reply=str(result.get("reply") or ""),
         case=str(result.get("case") or ""),
         brief_summary=str(result.get("brief_summary") or ""),
-        cdp_steps=steps or None,
+        test_suite=_suite_from_result(result.get("test_suite")),
         retrieved_chunk_count=int(result.get("retrieved_chunk_count", 0)),
     )

@@ -45,7 +45,7 @@ class HealthResponse(BaseModel):
 class RagSearchRequest(BaseModel):
     directory_path: str = Field(..., min_length=1)
     query: str = Field(..., min_length=1)
-    top_k: int = Field(default=8, ge=1, le=30)
+    top_k: int = Field(default=20, ge=1, le=30)
 
 
 class RagChunkResult(BaseModel):
@@ -66,12 +66,20 @@ class RagSearchResponse(BaseModel):
 class PlanRef(BaseModel):
     id: str
     title: str = ""
+    response_id: str = ""
+    feature: str = ""
+    kind: str = ""
 
 
 class CdpRunRef(BaseModel):
     cdp_step_id: str
     status: Literal["passed", "failure"]
     status_message: str = ""
+    response_id: str = ""
+    feature: str = ""
+    case_id: str = ""
+    title: str = ""
+    kind: str = ""
 
 
 class CdpStep(BaseModel):
@@ -80,7 +88,33 @@ class CdpStep(BaseModel):
     actions: list[dict]
 
 
+class LatestSuiteCase(BaseModel):
+    id: str
+    kind: str = ""
+    title: str = ""
+    steps: list[CdpStep] = Field(default_factory=list)
+
+
+class LatestTestSuite(BaseModel):
+    response_id: str = ""
+    feature: str = ""
+    cases: list[LatestSuiteCase] = Field(default_factory=list)
+
+
+class SuiteCase(BaseModel):
+    kind: Literal["success", "failure", "edge"]
+    title: str
+    explanation: str = ""
+    steps: list[CdpStep]
+
+
+class TestSuite(BaseModel):
+    feature: str
+    cases: list[SuiteCase]
+
+
 class ChatCompletionRequest(BaseModel):
+    conversation_id: str = Field(..., min_length=1)
     workspace_path: str = Field(..., min_length=1)
     message: str = Field(..., min_length=1)
     generation_model: str = Field(..., min_length=1)
@@ -91,11 +125,14 @@ class ChatCompletionRequest(BaseModel):
     plans: list[PlanRef] = Field(default_factory=list)
     cdp_runs: list[CdpRunRef] = Field(default_factory=list)
     latest_cdp_steps: list[CdpStep] | None = None
+    latest_test_suite: LatestTestSuite | None = None
 
 
 class ChatCompletionResponse(BaseModel):
+    conversation_id: str
+    response_id: str
     reply: str
     case: str = ""
     brief_summary: str = ""
-    cdp_steps: list[CdpStep] | None = None
+    test_suite: TestSuite | None = None
     retrieved_chunk_count: int = 0

@@ -6,30 +6,108 @@ from typing import Any
 
 import httpx
 
-from app.prompts import INTRO_USER_PROMPT, SYSTEM_PROMPT
+from app.prompts import INTRO_REPLY, INTRO_USER_PROMPT, SYSTEM_PROMPT
 
 
 class LlmError(Exception):
     pass
 
 
-def _wants_cdp_steps(message: str) -> bool:
+def _wants_test_suite(message: str) -> bool:
     text = message.lower().strip().rstrip(".!")
-    if text in {"yes", "y", "ok", "okay", "sure", "go ahead", "do it", "please do"}:
+    if text in {"yes", "y", "ok", "okay", "sure", "go ahead", "do it", "please do", "proceed"}:
         return True
     phrases = (
+        "test suite",
         "cdp step",
         "cdp steps",
         "create the step",
         "create me the",
         "generate the step",
         "generate steps",
+        "generate the suite",
         "generate the cdp",
         "start the test",
         "let's start",
         "lets start",
     )
     return any(phrase in text for phrase in phrases)
+
+
+def _mock_suite() -> dict[str, Any]:
+    return {
+        "feature": "Login",
+        "cases": [
+            {
+                "kind": "success",
+                "title": "Success test case",
+                "explanation": "Signs in with valid credentials and reaches /done.",
+                "steps": _mock_login_steps(),
+            },
+            {
+                "kind": "failure",
+                "title": "Failure test case",
+                "explanation": "Submits the form without credentials and waits for the app's error text.",
+                "steps": [
+                    {
+                        "id": "navigate-home",
+                        "label": "Navigate to home page",
+                        "actions": [{"type": "navigate", "path": "/"}],
+                    },
+                    {
+                        "id": "submit-empty",
+                        "label": "Submit empty login",
+                        "actions": [
+                            {
+                                "type": "click",
+                                "selectors": [
+                                    '[data-testid="submit"]',
+                                    'button[type="submit"]',
+                                ],
+                            }
+                        ],
+                    },
+                    {
+                        "id": "assert-error",
+                        "label": "Confirm the error",
+                        "actions": [
+                            {
+                                "type": "waitForText",
+                                "text": "Invalid",
+                                "timeoutMs": 15000,
+                            }
+                        ],
+                    },
+                ],
+            },
+            {
+                "kind": "edge",
+                "title": "Password field stays masked",
+                "explanation": "The password control is an input of type password.",
+                "steps": [
+                    {
+                        "id": "navigate-home",
+                        "label": "Navigate to home page",
+                        "actions": [{"type": "navigate", "path": "/"}],
+                    },
+                    {
+                        "id": "fill-password",
+                        "label": "Fill password",
+                        "actions": [
+                            {
+                                "type": "fill",
+                                "selectors": [
+                                    '[data-testid="password"]',
+                                    'input[type="password"]',
+                                ],
+                                "value": "demo-pass",
+                            }
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
 
 
 def _mock_login_steps() -> list[dict[str, Any]]:
@@ -94,36 +172,36 @@ def _mock_response(
 ) -> dict[str, Any]:
     if mode == "intro":
         return {
-            "reply": (
-                "I can explain this codebase and create CDP steps when you want to test a flow.\n"
-                "\n"
-                "- Ask how something works\n"
-                "- Or tell me to ##create the steps##"
-            ),
-            "case": "No requirement yet.",
-            "brief_summary": "No requirement yet.",
-            "cdp_steps": None,
+            "reply": INTRO_REPLY,
+            "case": "No requirement has been given yet.",
+            "brief_summary": "No requirement has been given yet.",
+            "test_suite": None,
         }
-    if _wants_cdp_steps(message):
+    if _wants_test_suite(message):
         return {
             "reply": (
-                "Created CDP steps for the ##login flow##.\n"
-                "\n"
-                "- Use *Run Test* when you want to execute them"
+                "- ##Success test case##\n"
+                "Signs in with valid credentials and reaches /done.\n"
+                "- ##Failure test case##\n"
+                "Submits the form without credentials and waits for the app's error text.\n"
+                "- ##Edge cases##\n"
+                "-- ##Password field stays masked##\n"
+                "The password control is an input of type password."
             ),
-            "case": case or "- User asked for CDP steps for the ##login flow##.",
-            "brief_summary": brief_summary or "Login flow CDP steps were created.",
-            "cdp_steps": _mock_login_steps(),
+            "case": case or "- User confirmed a CDP test suite for ##Login##.",
+            "brief_summary": brief_summary or "Login test suite was created.",
+            "test_suite": _mock_suite(),
         }
     gist = brief_summary or (case or message[:160]).replace("\n", " ")
     return {
         "reply": (
-            f"(Mock LLM) {message[:300]}. "
-            "Say yes or ask me to create the CDP steps when you want a runnable plan."
+            f"(Mock LLM) {message[:300]}.\n"
+            "\n"
+            "Shall I proceed with generating the test suite for Login?"
         ),
         "case": case or message[:300],
         "brief_summary": gist[:180],
-        "cdp_steps": None,
+        "test_suite": None,
     }
 
 
@@ -133,9 +211,10 @@ def _build_user_payload(
     message: str,
     case: str,
     brief_summary: str,
-    plans: list[dict[str, str]],
-    cdp_runs: list[dict[str, str]],
+    plans: list[dict[str, Any]],
+    cdp_runs: list[dict[str, Any]],
     latest_cdp_steps: list[dict[str, Any]] | None,
+    latest_test_suite: dict[str, Any] | None,
     retrieved_context: list[dict[str, Any]],
 ) -> str:
     parts: list[str] = []
@@ -147,11 +226,13 @@ def _build_user_payload(
         parts.append(f"plans:\n{json.dumps(plans, indent=2)}")
     if cdp_runs:
         parts.append(f"cdp_runs:\n{json.dumps(cdp_runs, indent=2)}")
-    if latest_cdp_steps:
+    if latest_test_suite:
+        parts.append(f"latest_test_suite:\n{json.dumps(latest_test_suite, indent=2)}")
+    elif latest_cdp_steps:
         parts.append(f"latest_cdp_steps:\n{json.dumps(latest_cdp_steps, indent=2)}")
     if retrieved_context:
         parts.append("retrieved_workspace_context:")
-        for chunk in retrieved_context[:12]:
+        for chunk in retrieved_context[:20]:
             path = chunk.get("path", "?")
             start = chunk.get("start_line", "?")
             end = chunk.get("end_line", "?")
@@ -188,6 +269,52 @@ def _normalize_steps(raw: object) -> list[dict[str, Any]] | None:
     return steps
 
 
+def _normalize_suite(raw: object) -> dict[str, Any] | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise LlmError("test_suite must be an object or null")
+    feature = raw.get("feature")
+    cases = raw.get("cases")
+    if not isinstance(feature, str) or not feature.strip():
+        raise LlmError("test_suite needs a feature")
+    if not isinstance(cases, list):
+        raise LlmError("test_suite.cases must be a list")
+    grouped: dict[str, list[dict[str, Any]]] = {
+        "success": [],
+        "failure": [],
+        "edge": [],
+    }
+    for item in cases:
+        if not isinstance(item, dict):
+            continue
+        kind = item.get("kind")
+        if kind not in grouped:
+            continue
+        title = item.get("title")
+        if not isinstance(title, str) or not title.strip():
+            continue
+        explanation = item.get("explanation")
+        if not isinstance(explanation, str):
+            explanation = ""
+        steps = _normalize_steps(item.get("steps"))
+        if not steps:
+            continue
+        grouped[kind].append(
+            {
+                "kind": kind,
+                "title": title.strip(),
+                "explanation": explanation.strip(),
+                "steps": steps,
+            }
+        )
+    ordered = [*grouped["success"], *grouped["failure"], *grouped["edge"]]
+    ordered = ordered[:40]
+    if not ordered:
+        return None
+    return {"feature": feature.strip(), "cases": ordered}
+
+
 def _parse_json_response(raw: str) -> dict[str, Any]:
     text = raw.strip()
     if text.startswith("```"):
@@ -204,11 +331,26 @@ def _parse_json_response(raw: str) -> dict[str, Any]:
         raise LlmError("LLM JSON must include a reply string")
     case = data.get("case") if isinstance(data.get("case"), str) else ""
     brief = data.get("brief_summary") if isinstance(data.get("brief_summary"), str) else ""
+    suite = _normalize_suite(data.get("test_suite"))
+    if suite is None:
+        legacy = _normalize_steps(data.get("cdp_steps"))
+        if legacy:
+            suite = {
+                "feature": "Feature",
+                "cases": [
+                    {
+                        "kind": "success",
+                        "title": "Success test case",
+                        "explanation": "",
+                        "steps": legacy,
+                    }
+                ],
+            }
     return {
         "reply": reply.strip(),
         "case": case.strip(),
         "brief_summary": brief.strip(),
-        "cdp_steps": _normalize_steps(data.get("cdp_steps")),
+        "test_suite": suite,
     }
 
 
@@ -220,13 +362,18 @@ async def complete_chat(
     message: str,
     case: str = "",
     brief_summary: str = "",
-    plans: list[dict[str, str]] | None = None,
-    cdp_runs: list[dict[str, str]] | None = None,
+    plans: list[dict[str, Any]] | None = None,
+    cdp_runs: list[dict[str, Any]] | None = None,
     latest_cdp_steps: list[dict[str, Any]] | None = None,
+    latest_test_suite: dict[str, Any] | None = None,
     retrieved_context: list[dict[str, Any]] | None = None,
     openai_base_url: str = "https://api.openai.com/v1",
 ) -> dict[str, Any]:
-    if os.environ.get("TURSOR_AI_MOCK_LLM", "").strip() in ("1", "true", "yes"):
+    if mode == "intro" or os.environ.get("TURSOR_AI_MOCK_LLM", "").strip() in (
+        "1",
+        "true",
+        "yes",
+    ):
         return _mock_response(mode, message, case, brief_summary)
 
     user_content = _build_user_payload(
@@ -237,6 +384,7 @@ async def complete_chat(
         plans=plans or [],
         cdp_runs=cdp_runs or [],
         latest_cdp_steps=latest_cdp_steps,
+        latest_test_suite=latest_test_suite,
         retrieved_context=retrieved_context or [],
     )
 
@@ -255,12 +403,17 @@ async def complete_chat(
         "Content-Type": "application/json",
     }
 
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        res = await client.post(
-            f"{openai_base_url.rstrip('/')}/chat/completions",
-            headers=headers,
-            json=payload,
-        )
+    try:
+        async with httpx.AsyncClient(timeout=180.0) as client:
+            res = await client.post(
+                f"{openai_base_url.rstrip('/')}/chat/completions",
+                headers=headers,
+                json=payload,
+            )
+    except httpx.TimeoutException as exc:
+        raise LlmError(
+            "The model took too long to answer. Send the message again."
+        ) from exc
 
     if res.status_code >= 400:
         raise LlmError(f"OpenAI HTTP {res.status_code}: {res.text[:500]}")
