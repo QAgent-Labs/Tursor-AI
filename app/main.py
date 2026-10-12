@@ -4,6 +4,8 @@ from fastapi import FastAPI, HTTPException, Query
 
 from app.chat_service import run_chat_completion
 from app.embed_service import build_embeddings, validate_workspace
+from app.feature_map import write_feature_map
+from app.storage import load_stored_chunks
 from app.rag_service import search_workspace
 from app.schemas import (
     CdpStep,
@@ -11,6 +13,8 @@ from app.schemas import (
     ChatCompletionResponse,
     EmbedRequest,
     EmbedResponse,
+    FeatureMapRequest,
+    FeatureMapResponse,
     HealthResponse,
     RagChunkResult,
     RagSearchRequest,
@@ -71,6 +75,20 @@ def embed_workspace(body: EmbedRequest) -> EmbedResponse:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except OSError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/v1/feature-map", response_model=FeatureMapResponse)
+def build_feature_map(body: FeatureMapRequest) -> FeatureMapResponse:
+    try:
+        cfg = validate_workspace(body.directory_path)
+        records = load_stored_chunks(cfg.embeddings_path)
+        features = write_feature_map(cfg, records)
+    except TursorConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return FeatureMapResponse(
+        features=len(features),
+        skipped=len(features) == 0,
+    )
 
 
 @app.post("/v1/rag/search", response_model=RagSearchResponse)

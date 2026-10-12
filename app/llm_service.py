@@ -216,8 +216,11 @@ def _build_user_payload(
     latest_cdp_steps: list[dict[str, Any]] | None,
     latest_test_suite: dict[str, Any] | None,
     retrieved_context: list[dict[str, Any]],
+    feature_map: list[dict[str, Any]] | None = None,
 ) -> str:
     parts: list[str] = []
+    if feature_map:
+        parts.append("feature_map:\n" + json.dumps(feature_map, indent=2))
     if case.strip():
         parts.append(f"case:\n{case.strip()}")
     if brief_summary.strip():
@@ -232,7 +235,7 @@ def _build_user_payload(
         parts.append(f"latest_cdp_steps:\n{json.dumps(latest_cdp_steps, indent=2)}")
     if retrieved_context:
         parts.append("retrieved_workspace_context:")
-        for chunk in retrieved_context[:20]:
+        for chunk in retrieved_context[:100]:
             path = chunk.get("path", "?")
             start = chunk.get("start_line", "?")
             end = chunk.get("end_line", "?")
@@ -367,6 +370,7 @@ async def complete_chat(
     latest_cdp_steps: list[dict[str, Any]] | None = None,
     latest_test_suite: dict[str, Any] | None = None,
     retrieved_context: list[dict[str, Any]] | None = None,
+    feature_map: list[dict[str, Any]] | None = None,
     openai_base_url: str = "https://api.openai.com/v1",
 ) -> dict[str, Any]:
     if mode == "intro" or os.environ.get("TURSOR_AI_MOCK_LLM", "").strip() in (
@@ -386,6 +390,7 @@ async def complete_chat(
         latest_cdp_steps=latest_cdp_steps,
         latest_test_suite=latest_test_suite,
         retrieved_context=retrieved_context or [],
+        feature_map=feature_map,
     )
 
     payload = {
@@ -404,7 +409,7 @@ async def complete_chat(
     }
 
     try:
-        async with httpx.AsyncClient(timeout=180.0) as client:
+        async with httpx.AsyncClient(timeout=300.0) as client:
             res = await client.post(
                 f"{openai_base_url.rstrip('/')}/chat/completions",
                 headers=headers,

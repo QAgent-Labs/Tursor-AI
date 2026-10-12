@@ -4,6 +4,7 @@ import hashlib
 from pathlib import Path
 
 from app.chunking import TextChunk, chunk_file
+from app.feature_map import map_path
 from app.embedder import embed_texts, model_name
 from app.file_walker import iter_indexable_files
 from app.schemas import EmbedResponse
@@ -184,6 +185,10 @@ def build_embeddings(directory_path: str) -> EmbedResponse:
         files_unchanged=files_unchanged,
     )
 
+    feature_map_needed = bool(
+        files_added or files_updated or files_removed or not map_path(embeddings_dir).is_file(),
+    )
+
     return EmbedResponse(
         directory_path=str(cfg.workspace_root),
         embeddings_dir=str(embeddings_dir),
@@ -195,4 +200,5 @@ def build_embeddings(directory_path: str) -> EmbedResponse:
         files_removed=files_removed,
         files_unchanged=files_unchanged,
         incremental=bool(existing_manifest),
+        feature_map_needed=feature_map_needed,
     )

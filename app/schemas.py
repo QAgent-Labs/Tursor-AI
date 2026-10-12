@@ -23,6 +23,17 @@ class EmbedResponse(BaseModel):
     files_removed: int = 0
     files_unchanged: int = 0
     incremental: bool = False
+    feature_map_needed: bool = False
+
+
+class FeatureMapRequest(BaseModel):
+    directory_path: str = Field(..., min_length=1)
+
+
+class FeatureMapResponse(BaseModel):
+    ok: bool = True
+    features: int = 0
+    skipped: bool = False
 
 
 class ValidateResponse(BaseModel):
