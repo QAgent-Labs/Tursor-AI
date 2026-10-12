@@ -149,6 +149,23 @@ def test_unnamed_feature_is_not_assumed(tmp_path, monkeypatch: pytest.MonkeyPatc
     assert body["retrieved_chunk_count"] == 0
     assert "Which feature" in body["reply"]
 
+    greeting = client.post(
+        "/v1/chat/completion",
+        json={
+            "conversation_id": "11111111-1111-4111-8111-111111111111",
+            "workspace_path": str(tmp_path),
+            "message": "hi",
+            "generation_model": "gpt-5.6",
+            "api_key": "sk-test",
+            "case": "No requirement has been given yet.",
+        },
+    )
+    assert greeting.status_code == 200
+    greeted = greeting.json()
+    assert greeted["intent"] == "general_qa"
+    assert greeted["retrieved_chunk_count"] == 0
+    assert "Which feature" not in greeted["reply"]
+
 
 def test_unmapped_flow_searches_code_without_nearest_features(
     tmp_path, monkeypatch: pytest.MonkeyPatch

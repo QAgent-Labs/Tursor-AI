@@ -137,8 +137,14 @@ def wants_generation(message: str) -> bool:
     return _is_test_request(normalize_message(message))
 
 
+_EMPTY_CASE = "no requirement has been given yet"
+
+
 def names_a_flow(message: str, case: str) -> bool:
-    text = normalize_message(f"{message}\n{case}")
+    recorded = normalize_message(case)
+    if recorded == _EMPTY_CASE:
+        recorded = ""
+    text = normalize_message(f"{message}\n{recorded}")
     for word in text.split():
         if len(word) <= 4:
             continue

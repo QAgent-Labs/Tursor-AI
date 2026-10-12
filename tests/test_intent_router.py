@@ -30,3 +30,4 @@ def test_a_named_flow_is_not_a_testing_concept() -> None:
     assert names_a_flow("how does account creation work?", "")
     assert not names_a_flow("hi i need to know how to test a feature", "")
     assert not names_a_flow("What is regression testing?", "")
+    assert not names_a_flow("hi", "No requirement has been given yet.")
