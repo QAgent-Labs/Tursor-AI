@@ -184,6 +184,8 @@ async def chat_completion(body: ChatCompletionRequest) -> ChatCompletionResponse
             cdp_runs=[run.model_dump() for run in body.cdp_runs],
             latest_cdp_steps=latest,
             latest_test_suite=latest_suite,
+            prior_intent=body.intent,
+            focus_paths=body.focus_paths,
         )
     except TursorConfigError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -198,4 +200,8 @@ async def chat_completion(body: ChatCompletionRequest) -> ChatCompletionResponse
         brief_summary=str(result.get("brief_summary") or ""),
         test_suite=_suite_from_result(result.get("test_suite")),
         retrieved_chunk_count=int(result.get("retrieved_chunk_count", 0)),
+        intent=str(result.get("intent") or ""),
+        focus_paths=[
+            path for path in result.get("focus_paths") or [] if isinstance(path, str)
+        ],
     )

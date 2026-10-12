@@ -137,6 +137,8 @@ class ChatCompletionRequest(BaseModel):
     cdp_runs: list[CdpRunRef] = Field(default_factory=list)
     latest_cdp_steps: list[CdpStep] | None = None
     latest_test_suite: LatestTestSuite | None = None
+    intent: str = ""
+    focus_paths: list[str] = Field(default_factory=list)
 
 
 class ChatCompletionResponse(BaseModel):
@@ -147,3 +149,5 @@ class ChatCompletionResponse(BaseModel):
     brief_summary: str = ""
     test_suite: TestSuite | None = None
     retrieved_chunk_count: int = 0
+    intent: str = ""
+    focus_paths: list[str] = Field(default_factory=list)

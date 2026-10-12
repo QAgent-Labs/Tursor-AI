@@ -23,7 +23,7 @@ def search_workspace(
     workspace_path: str,
     query: str,
     *,
-    top_k: int = 100,
+    top_k: int = 50,
 ) -> list[dict[str, str | int | float]]:
     cfg = load_tursor_config(Path(workspace_path))
     chunks = load_stored_chunks(cfg.embeddings_path)
