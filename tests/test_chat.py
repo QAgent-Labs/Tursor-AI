@@ -167,7 +167,7 @@ def test_unnamed_feature_is_not_assumed(tmp_path, monkeypatch: pytest.MonkeyPatc
     assert "Which feature" not in greeted["reply"]
 
 
-def test_unmapped_flow_searches_code_without_nearest_features(
+def test_feature_turn_searches_and_selects_closest_features(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("TURSOR_AI_MOCK_LLM", "1")
@@ -180,10 +180,13 @@ def test_unmapped_flow_searches_code_without_nearest_features(
     )
     build_embeddings(str(tmp_path))
 
-    def fail_select(*_args, **_kwargs):
-        raise AssertionError("an unmatched flow must not attach the nearest map features")
+    selected: list[str] = []
 
-    monkeypatch.setattr("app.chat_service.select_features", fail_select)
+    def record_select(features, query, **kwargs):
+        selected.append(query)
+        return []
+
+    monkeypatch.setattr("app.chat_service.select_features", record_select)
     client = TestClient(app)
     res = client.post(
         "/v1/chat/completion",
@@ -200,6 +203,7 @@ def test_unmapped_flow_searches_code_without_nearest_features(
     assert body["intent"] == "test_generation"
     assert body["retrieved_chunk_count"] > 0
     assert body["test_suite"]["feature"] == "Login"
+    assert selected
 
     explain = client.post(
         "/v1/chat/completion",
@@ -218,7 +222,7 @@ def test_unmapped_flow_searches_code_without_nearest_features(
     assert explained["retrieved_chunk_count"] > 0
 
 
-def test_confirmation_reuses_saved_files(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_confirmation_searches_again(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TURSOR_AI_MOCK_LLM", "1")
     tursor = tmp_path / ".tursor"
     tursor.mkdir()
@@ -226,10 +230,13 @@ def test_confirmation_reuses_saved_files(tmp_path, monkeypatch: pytest.MonkeyPat
     (tmp_path / "app.ts").write_text("export const ok = true;\n", encoding="utf-8")
     build_embeddings(str(tmp_path))
 
-    def fail_search(*_args, **_kwargs):
-        raise AssertionError("a confirmation must reuse the saved files")
+    searched: list[str] = []
 
-    monkeypatch.setattr("app.chat_service.search_workspace", fail_search)
+    def record_search(*args, **kwargs):
+        searched.append(kwargs.get("query") or args[1])
+        return []
+
+    monkeypatch.setattr("app.chat_service.search_workspace", record_search)
     client = TestClient(app)
     res = client.post(
         "/v1/chat/completion",
@@ -248,4 +255,59 @@ def test_confirmation_reuses_saved_files(tmp_path, monkeypatch: pytest.MonkeyPat
     body = res.json()
     assert body["intent"] == "test_generation"
     assert body["test_suite"]["feature"] == "Login"
-    assert body["focus_paths"] == ["app.ts"]
+    assert searched
+    assert "Login flow." in searched[0]
+    assert body["focus_paths"] == []
+
+
+def test_supplied_values_keep_the_suite(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    tursor = tmp_path / ".tursor"
+    tursor.mkdir()
+    (tursor / "config.json").write_text('{"excluded": []}', encoding="utf-8")
+    (tmp_path / "app.ts").write_text("export const ok = true;\n", encoding="utf-8")
+    build_embeddings(str(tmp_path))
+
+    suite = {
+        "feature": "Create account",
+        "cases": [
+            {
+                "kind": "success",
+                "title": "A curator account reaches onboarding.",
+                "explanation": "The review step submits and the studio onboarding screen stays open.",
+                "steps": [
+                    {
+                        "id": "open-home",
+                        "label": "Open the home page",
+                        "actions": [{"type": "navigate", "path": "/"}],
+                    }
+                ],
+            }
+        ],
+    }
+
+    async def return_suite(**_kwargs):
+        return {
+            "reply": "Building the Create account suite.",
+            "case": "Create account for nav@web.in.",
+            "brief_summary": "Create account",
+            "test_suite": suite,
+        }
+
+    monkeypatch.setattr("app.chat_service.complete_chat", return_suite)
+    client = TestClient(app)
+    res = client.post(
+        "/v1/chat/completion",
+        json={
+            "conversation_id": "11111111-1111-4111-8111-111111111111",
+            "workspace_path": str(tmp_path),
+            "message": "nav@web.in\nnavaneeth\nnavaneeth n\nknight soldier\ncurator",
+            "generation_model": "gpt-5.6",
+            "api_key": "sk-test",
+            "case": "Create account flow. Email, password, name, studio, and role are still needed.",
+            "intent": "feature",
+        },
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["intent"] == "feature"
+    assert body["test_suite"]["feature"] == "Create account"

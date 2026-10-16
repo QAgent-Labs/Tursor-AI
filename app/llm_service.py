@@ -264,7 +264,7 @@ def _build_user_payload(
         parts.append(f"latest_cdp_steps:\n{json.dumps(latest_cdp_steps, indent=2)}")
     if retrieved_context:
         parts.append("retrieved_workspace_context:")
-        for chunk in retrieved_context[:50]:
+        for chunk in retrieved_context[:100]:
             path = chunk.get("path", "?")
             start = chunk.get("start_line", "?")
             end = chunk.get("end_line", "?")

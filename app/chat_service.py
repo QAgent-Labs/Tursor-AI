@@ -17,7 +17,7 @@ from app.intent_router import (
     wants_generation,
 )
 from app.llm_service import LlmError, complete_chat
-from app.prompts import SYSTEM_PROMPT
+from app.prompts import GENERAL_CHAT_PROMPT, SYSTEM_PROMPT
 from app.rag_service import ensure_embeddings_exist, search_workspace
 from app.selector_grounding import ground_suite
 from app.storage import load_stored_chunks
@@ -65,14 +65,12 @@ async def run_chat_completion(
     cdp_runs: list[dict[str, Any]] | None = None,
     latest_cdp_steps: list[dict[str, Any]] | None = None,
     latest_test_suite: dict[str, Any] | None = None,
-    rag_top_k: int = 50,
+    rag_top_k: int = 100,
     prior_intent: str = "",
     focus_paths: list[str] | None = None,
 ) -> dict[str, Any]:
     cfg = load_tursor_config(Path(workspace_path))
     ensure_embeddings_exist(cfg)
-    saved_paths = [path for path in (focus_paths or []) if isinstance(path, str) and path]
-
     if mode != "intro":
         catalog = load_feature_map(cfg.embeddings_path)
         names = [
@@ -111,22 +109,15 @@ async def run_chat_completion(
                 feature_names=names,
                 intent=GENERAL_QA,
                 focus_paths=[],
-                system_prompt=SYSTEM_PROMPT,
+                system_prompt=GENERAL_CHAT_PROMPT,
                 allow_suite=False,
             )
 
         records = load_stored_chunks(cfg.embeddings_path)
-        reuse = confirming and bool(saved_paths)
-        if reuse:
-            retrieved = dependency_chunks(records, [{"dependencies": saved_paths}])
-            features = named
-            next_paths = saved_paths
-        else:
-            query = _retrieval_query(mode, message, case)
-            retrieved = search_workspace(workspace_path, query, top_k=rag_top_k) if query else []
-            features = named
-            retrieved = _with_dependency_chunks(records, features, retrieved, rag_top_k)
-            next_paths = _dependency_paths(features) or saved_paths
+        query = _retrieval_query(mode, message, case)
+        retrieved = search_workspace(workspace_path, query, top_k=rag_top_k) if query else []
+        features = select_features(catalog, query) if query else []
+        retrieved = _with_dependency_chunks(records, features, retrieved, rag_top_k)
         return await _complete(
             generation_model=generation_model,
             api_key=api_key,
@@ -142,9 +133,9 @@ async def run_chat_completion(
             features=features,
             records=records,
             intent=TEST_GENERATION if generate else FEATURE,
-            focus_paths=next_paths,
+            focus_paths=_dependency_paths(features),
             system_prompt=SYSTEM_PROMPT,
-            allow_suite=generate,
+            allow_suite=True,
         )
 
     query = _retrieval_query(mode, message, case)
