@@ -87,3 +87,227 @@ def test_chat_completion_mock_llm(tmp_path, monkeypatch: pytest.MonkeyPatch) -> 
     assert "failure" in kinds
     assert suite["cases"][0]["steps"]
     assert suite["cases"][0]["steps"][0]["actions"]
+    assert body["intent"] == "test_generation"
+
+
+def test_general_question_does_not_retrieve(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TURSOR_AI_MOCK_LLM", "1")
+    tursor = tmp_path / ".tursor"
+    tursor.mkdir()
+    (tursor / "config.json").write_text('{"excluded": []}', encoding="utf-8")
+    (tmp_path / "app.ts").write_text("export const ok = true;\n", encoding="utf-8")
+    build_embeddings(str(tmp_path))
+
+    def fail_search(*_args, **_kwargs):
+        raise AssertionError("general questions must not search the workspace")
+
+    monkeypatch.setattr("app.chat_service.search_workspace", fail_search)
+    client = TestClient(app)
+    res = client.post(
+        "/v1/chat/completion",
+        json={
+            "conversation_id": "11111111-1111-4111-8111-111111111111",
+            "workspace_path": str(tmp_path),
+            "message": "What is regression testing?",
+            "generation_model": "gpt-5.6",
+            "api_key": "sk-test",
+        },
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["intent"] == "general_qa"
+    assert body["test_suite"] is None
+    assert body["retrieved_chunk_count"] == 0
+
+
+def test_unnamed_feature_is_not_assumed(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TURSOR_AI_MOCK_LLM", "1")
+    tursor = tmp_path / ".tursor"
+    tursor.mkdir()
+    (tursor / "config.json").write_text('{"excluded": []}', encoding="utf-8")
+    (tmp_path / "app.ts").write_text("export const ok = true;\n", encoding="utf-8")
+    build_embeddings(str(tmp_path))
+
+    def fail_search(*_args, **_kwargs):
+        raise AssertionError("an unnamed feature must not search the workspace")
+
+    monkeypatch.setattr("app.chat_service.search_workspace", fail_search)
+    client = TestClient(app)
+    res = client.post(
+        "/v1/chat/completion",
+        json={
+            "conversation_id": "11111111-1111-4111-8111-111111111111",
+            "workspace_path": str(tmp_path),
+            "message": "hi i need to know how to test a feature",
+            "generation_model": "gpt-5.6",
+            "api_key": "sk-test",
+        },
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["test_suite"] is None
+    assert body["retrieved_chunk_count"] == 0
+    assert "Which feature" in body["reply"]
+
+    greeting = client.post(
+        "/v1/chat/completion",
+        json={
+            "conversation_id": "11111111-1111-4111-8111-111111111111",
+            "workspace_path": str(tmp_path),
+            "message": "hi",
+            "generation_model": "gpt-5.6",
+            "api_key": "sk-test",
+            "case": "No requirement has been given yet.",
+        },
+    )
+    assert greeting.status_code == 200
+    greeted = greeting.json()
+    assert greeted["intent"] == "general_qa"
+    assert greeted["retrieved_chunk_count"] == 0
+    assert "Which feature" not in greeted["reply"]
+
+
+def test_feature_turn_searches_and_selects_closest_features(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TURSOR_AI_MOCK_LLM", "1")
+    tursor = tmp_path / ".tursor"
+    tursor.mkdir()
+    (tursor / "config.json").write_text('{"excluded": []}', encoding="utf-8")
+    (tmp_path / "RegisterPage.tsx").write_text(
+        "export function RegisterPage() { return <h2>Create account</h2>; }\n",
+        encoding="utf-8",
+    )
+    build_embeddings(str(tmp_path))
+
+    selected: list[str] = []
+
+    def record_select(features, query, **kwargs):
+        selected.append(query)
+        return []
+
+    monkeypatch.setattr("app.chat_service.select_features", record_select)
+    client = TestClient(app)
+    res = client.post(
+        "/v1/chat/completion",
+        json={
+            "conversation_id": "11111111-1111-4111-8111-111111111111",
+            "workspace_path": str(tmp_path),
+            "message": "i want to test the account creation flow",
+            "generation_model": "gpt-5.6",
+            "api_key": "sk-test",
+        },
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["intent"] == "test_generation"
+    assert body["retrieved_chunk_count"] > 0
+    assert body["test_suite"]["feature"] == "Login"
+    assert selected
+
+    explain = client.post(
+        "/v1/chat/completion",
+        json={
+            "conversation_id": "11111111-1111-4111-8111-111111111111",
+            "workspace_path": str(tmp_path),
+            "message": "how does account creation work?",
+            "generation_model": "gpt-5.6",
+            "api_key": "sk-test",
+        },
+    )
+    assert explain.status_code == 200
+    explained = explain.json()
+    assert explained["intent"] == "feature"
+    assert explained["test_suite"] is None
+    assert explained["retrieved_chunk_count"] > 0
+
+
+def test_confirmation_searches_again(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TURSOR_AI_MOCK_LLM", "1")
+    tursor = tmp_path / ".tursor"
+    tursor.mkdir()
+    (tursor / "config.json").write_text('{"excluded": []}', encoding="utf-8")
+    (tmp_path / "app.ts").write_text("export const ok = true;\n", encoding="utf-8")
+    build_embeddings(str(tmp_path))
+
+    searched: list[str] = []
+
+    def record_search(*args, **kwargs):
+        searched.append(kwargs.get("query") or args[1])
+        return []
+
+    monkeypatch.setattr("app.chat_service.search_workspace", record_search)
+    client = TestClient(app)
+    res = client.post(
+        "/v1/chat/completion",
+        json={
+            "conversation_id": "11111111-1111-4111-8111-111111111111",
+            "workspace_path": str(tmp_path),
+            "message": "yes",
+            "generation_model": "gpt-5.6",
+            "api_key": "sk-test",
+            "intent": "feature",
+            "focus_paths": ["app.ts"],
+            "case": "Login flow.",
+        },
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["intent"] == "test_generation"
+    assert body["test_suite"]["feature"] == "Login"
+    assert searched
+    assert "Login flow." in searched[0]
+    assert body["focus_paths"] == []
+
+
+def test_supplied_values_keep_the_suite(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    tursor = tmp_path / ".tursor"
+    tursor.mkdir()
+    (tursor / "config.json").write_text('{"excluded": []}', encoding="utf-8")
+    (tmp_path / "app.ts").write_text("export const ok = true;\n", encoding="utf-8")
+    build_embeddings(str(tmp_path))
+
+    suite = {
+        "feature": "Create account",
+        "cases": [
+            {
+                "kind": "success",
+                "title": "A curator account reaches onboarding.",
+                "explanation": "The review step submits and the studio onboarding screen stays open.",
+                "steps": [
+                    {
+                        "id": "open-home",
+                        "label": "Open the home page",
+                        "actions": [{"type": "navigate", "path": "/"}],
+                    }
+                ],
+            }
+        ],
+    }
+
+    async def return_suite(**_kwargs):
+        return {
+            "reply": "Building the Create account suite.",
+            "case": "Create account for nav@web.in.",
+            "brief_summary": "Create account",
+            "test_suite": suite,
+        }
+
+    monkeypatch.setattr("app.chat_service.complete_chat", return_suite)
+    client = TestClient(app)
+    res = client.post(
+        "/v1/chat/completion",
+        json={
+            "conversation_id": "11111111-1111-4111-8111-111111111111",
+            "workspace_path": str(tmp_path),
+            "message": "nav@web.in\nnavaneeth\nnavaneeth n\nknight soldier\ncurator",
+            "generation_model": "gpt-5.6",
+            "api_key": "sk-test",
+            "case": "Create account flow. Email, password, name, studio, and role are still needed.",
+            "intent": "feature",
+        },
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["intent"] == "feature"
+    assert body["test_suite"]["feature"] == "Create account"

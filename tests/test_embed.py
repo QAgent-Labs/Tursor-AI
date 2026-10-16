@@ -33,6 +33,7 @@ def test_embed_writes_artifacts(tmp_path: Path) -> None:
     result = build_embeddings(str(tmp_path))
     assert result.files_indexed == 1
     assert result.chunks_indexed >= 1
+    assert result.feature_map_needed is True
     assert (tursor / "embeddings" / "manifest.json").is_file()
     assert (tursor / "embeddings" / "chunks.jsonl").is_file()
 

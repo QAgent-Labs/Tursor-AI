@@ -169,6 +169,7 @@ def _mock_response(
     message: str,
     case: str,
     brief_summary: str,
+    intent: str = "",
 ) -> dict[str, Any]:
     if mode == "intro":
         return {
@@ -177,7 +178,32 @@ def _mock_response(
             "brief_summary": "No requirement has been given yet.",
             "test_suite": None,
         }
-    if _wants_test_suite(message):
+    if intent == "general_qa":
+        asks_for_a_feature = "feature" in message.lower() and not case.strip()
+        return {
+            "reply": "Which feature should I test?" if asks_for_a_feature else message[:300],
+            "case": case,
+            "brief_summary": brief_summary,
+            "test_suite": None,
+        }
+    if intent == "feature":
+        return {
+            "reply": (
+                "##Login##\n"
+                "\n"
+                "The sign-in screen asks for an email and a password.\n"
+                "\n"
+                "##Sign in##\n"
+                "- Email and password.\n"
+                "- The button says Sign in.\n"
+                "- Invalid credentials stay on the page.\n"
+                "- A valid sign-in opens the studio."
+            ),
+            "case": case or "Login flow.",
+            "brief_summary": brief_summary or "Explained the login flow.",
+            "test_suite": None,
+        }
+    if intent == "test_generation" or _wants_test_suite(message):
         return {
             "reply": (
                 "- ##Success test case##\n"
@@ -216,8 +242,14 @@ def _build_user_payload(
     latest_cdp_steps: list[dict[str, Any]] | None,
     latest_test_suite: dict[str, Any] | None,
     retrieved_context: list[dict[str, Any]],
+    feature_map: list[dict[str, Any]] | None = None,
+    feature_names: list[str] | None = None,
 ) -> str:
     parts: list[str] = []
+    if feature_names:
+        parts.append("feature_names:\n" + json.dumps(feature_names))
+    if feature_map:
+        parts.append("feature_map:\n" + json.dumps(feature_map, indent=2))
     if case.strip():
         parts.append(f"case:\n{case.strip()}")
     if brief_summary.strip():
@@ -232,7 +264,7 @@ def _build_user_payload(
         parts.append(f"latest_cdp_steps:\n{json.dumps(latest_cdp_steps, indent=2)}")
     if retrieved_context:
         parts.append("retrieved_workspace_context:")
-        for chunk in retrieved_context[:20]:
+        for chunk in retrieved_context[:100]:
             path = chunk.get("path", "?")
             start = chunk.get("start_line", "?")
             end = chunk.get("end_line", "?")
@@ -367,6 +399,10 @@ async def complete_chat(
     latest_cdp_steps: list[dict[str, Any]] | None = None,
     latest_test_suite: dict[str, Any] | None = None,
     retrieved_context: list[dict[str, Any]] | None = None,
+    feature_map: list[dict[str, Any]] | None = None,
+    feature_names: list[str] | None = None,
+    system_prompt: str | None = None,
+    intent: str = "",
     openai_base_url: str = "https://api.openai.com/v1",
 ) -> dict[str, Any]:
     if mode == "intro" or os.environ.get("TURSOR_AI_MOCK_LLM", "").strip() in (
@@ -374,7 +410,7 @@ async def complete_chat(
         "true",
         "yes",
     ):
-        return _mock_response(mode, message, case, brief_summary)
+        return _mock_response(mode, message, case, brief_summary, intent)
 
     user_content = _build_user_payload(
         mode=mode,
@@ -386,12 +422,14 @@ async def complete_chat(
         latest_cdp_steps=latest_cdp_steps,
         latest_test_suite=latest_test_suite,
         retrieved_context=retrieved_context or [],
+        feature_map=feature_map,
+        feature_names=feature_names,
     )
 
     payload = {
         "model": generation_model,
         "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt or SYSTEM_PROMPT},
             {"role": "user", "content": user_content},
         ],
         "temperature": 1,
@@ -404,7 +442,7 @@ async def complete_chat(
     }
 
     try:
-        async with httpx.AsyncClient(timeout=180.0) as client:
+        async with httpx.AsyncClient(timeout=300.0) as client:
             res = await client.post(
                 f"{openai_base_url.rstrip('/')}/chat/completions",
                 headers=headers,

@@ -23,6 +23,17 @@ class EmbedResponse(BaseModel):
     files_removed: int = 0
     files_unchanged: int = 0
     incremental: bool = False
+    feature_map_needed: bool = False
+
+
+class FeatureMapRequest(BaseModel):
+    directory_path: str = Field(..., min_length=1)
+
+
+class FeatureMapResponse(BaseModel):
+    ok: bool = True
+    features: int = 0
+    skipped: bool = False
 
 
 class ValidateResponse(BaseModel):
@@ -126,6 +137,8 @@ class ChatCompletionRequest(BaseModel):
     cdp_runs: list[CdpRunRef] = Field(default_factory=list)
     latest_cdp_steps: list[CdpStep] | None = None
     latest_test_suite: LatestTestSuite | None = None
+    intent: str = ""
+    focus_paths: list[str] = Field(default_factory=list)
 
 
 class ChatCompletionResponse(BaseModel):
@@ -136,3 +149,5 @@ class ChatCompletionResponse(BaseModel):
     brief_summary: str = ""
     test_suite: TestSuite | None = None
     retrieved_chunk_count: int = 0
+    intent: str = ""
+    focus_paths: list[str] = Field(default_factory=list)
