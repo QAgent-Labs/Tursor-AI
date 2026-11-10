@@ -4,9 +4,9 @@ import hashlib
 from pathlib import Path
 
 from app.chunking import TextChunk, chunk_file
-from app.feature_map import map_path
 from app.embedder import embed_texts, model_name
 from app.file_walker import iter_indexable_files
+from app.flow_map import load_flow_map
 from app.schemas import EmbedResponse
 from app.storage import (
     FileFingerprint,
@@ -185,8 +185,14 @@ def build_embeddings(directory_path: str) -> EmbedResponse:
         files_unchanged=files_unchanged,
     )
 
-    feature_map_needed = bool(
-        files_added or files_updated or files_removed or not map_path(embeddings_dir).is_file(),
+    existing_map = load_flow_map(embeddings_dir)
+    # A map built while some model calls failed is rebuilt until it is complete.
+    flow_map_needed = bool(
+        files_added
+        or files_updated
+        or files_removed
+        or existing_map is None
+        or existing_map.get("failed_batches", 0),
     )
 
     return EmbedResponse(
@@ -200,5 +206,5 @@ def build_embeddings(directory_path: str) -> EmbedResponse:
         files_removed=files_removed,
         files_unchanged=files_unchanged,
         incremental=bool(existing_manifest),
-        feature_map_needed=feature_map_needed,
+        flow_map_needed=flow_map_needed,
     )

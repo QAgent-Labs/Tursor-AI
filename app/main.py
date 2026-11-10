@@ -1,29 +1,36 @@
 import uuid
+from collections.abc import Awaitable, Callable
 
-from fastapi import FastAPI, HTTPException, Query
+import httpx
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 
 from app.chat_service import run_chat_completion
 from app.embed_service import build_embeddings, validate_workspace
-from app.feature_map import write_feature_map
-from app.storage import load_stored_chunks
+from app.flow_map import flow_nodes, write_flow_map
+from app.log_relay import Timer, bind_request, emit, unbind_request
 from app.rag_service import search_workspace
+from app.report_service import generate_report
 from app.schemas import (
     CdpStep,
     ChatCompletionRequest,
     ChatCompletionResponse,
     EmbedRequest,
     EmbedResponse,
-    FeatureMapRequest,
-    FeatureMapResponse,
+    FlowMapRequest,
+    FlowMapResponse,
     HealthResponse,
+    PrdResult,
     RagChunkResult,
     RagSearchRequest,
     RagSearchResponse,
+    ReportRequest,
+    ReportResponse,
     SuiteCase,
     TestSuite,
     ValidateResponse,
 )
 from app.settings import settings
+from app.storage import load_stored_chunks
 from app.tursor_config import TursorConfigError
 
 app = FastAPI(
@@ -34,6 +41,21 @@ app = FastAPI(
     ),
     version="0.1.0",
 )
+
+
+@app.middleware("http")
+async def bind_trace(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
+    """Logs from this request go to the backend's trace (see app.log_relay)."""
+    token = bind_request(
+        request.headers.get("x-tursor-trace"),
+        request.headers.get("x-tursor-log-sink"),
+    )
+    try:
+        return await call_next(request)
+    finally:
+        unbind_request(token)
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -67,8 +89,19 @@ def validate_config(
 
 @app.post("/v1/embed", response_model=EmbedResponse)
 def embed_workspace(body: EmbedRequest) -> EmbedResponse:
+    timer = Timer()
     try:
-        return build_embeddings(body.directory_path)
+        result = build_embeddings(body.directory_path)
+        emit(
+            "success",
+            "context",
+            f"Indexed {result.files_indexed} files into {result.chunks_indexed} chunks "
+            f"({result.files_added} added, {result.files_updated} updated, "
+            f"{result.files_removed} removed, {result.files_unchanged} unchanged).",
+            meta={"model": result.model, "incremental": result.incremental},
+            duration_ms=timer.ms(),
+        )
+        return result
     except TursorConfigError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ValueError as exc:
@@ -77,18 +110,47 @@ def embed_workspace(body: EmbedRequest) -> EmbedResponse:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@app.post("/v1/feature-map", response_model=FeatureMapResponse)
-def build_feature_map(body: FeatureMapRequest) -> FeatureMapResponse:
+@app.post("/v1/flow-map", response_model=FlowMapResponse)
+def build_flow_map(body: FlowMapRequest) -> FlowMapResponse:
     try:
         cfg = validate_workspace(body.directory_path)
         records = load_stored_chunks(cfg.embeddings_path)
-        features = write_feature_map(cfg, records)
+        flow = write_flow_map(cfg, records)
     except TursorConfigError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return FeatureMapResponse(
-        features=len(features),
-        skipped=len(features) == 0,
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Flow map model call failed: {exc}") from exc
+    nodes = flow_nodes(flow)
+    emit(
+        "warn" if flow.get("failed_batches") else "success",
+        "flowmap",
+        f"Flow map written: {len(nodes)} screens, "
+        f"{sum(1 for node in nodes if node.get('reachable'))} reachable from /, "
+        f"{flow.get('described', 0)} described by the model.",
     )
+    return FlowMapResponse(
+        screens=len(nodes),
+        reachable=sum(1 for node in nodes if node.get("reachable")),
+        described=int(flow.get("described", 0)),
+        failed_batches=int(flow.get("failed_batches", 0)),
+        skipped=len(nodes) == 0,
+    )
+
+
+@app.post("/v1/report", response_model=ReportResponse)
+async def build_report(body: ReportRequest) -> ReportResponse:
+    timer = Timer()
+    report = await generate_report(body)
+    m = report.metrics
+    emit(
+        "success",
+        "report",
+        f"Report {report.filename}: {m.total} cases, {m.executed} executed, "
+        f"{m.passed} passed, {m.failed} failed.",
+        meta=m.model_dump(),
+        duration_ms=timer.ms(),
+    )
+    return report
 
 
 @app.post("/v1/rag/search", response_model=RagSearchResponse)
@@ -151,17 +213,30 @@ def _suite_from_result(raw: object) -> TestSuite | None:
             continue
         title = item.get("title")
         explanation = item.get("explanation")
+        requirement_ids = item.get("requirement_ids")
         parsed.append(
             SuiteCase(
                 kind=kind,
                 title=title.strip() if isinstance(title, str) and title.strip() else "Test case",
                 explanation=explanation.strip() if isinstance(explanation, str) else "",
                 steps=steps,
+                requirement_ids=[
+                    value for value in requirement_ids if isinstance(value, str)
+                ]
+                if isinstance(requirement_ids, list)
+                else [],
             )
         )
     if not parsed:
         return None
-    return TestSuite(feature=feature.strip(), cases=parsed)
+    module_key = raw.get("module_key")
+    module_name = raw.get("module_name")
+    return TestSuite(
+        feature=feature.strip(),
+        module_key=module_key if isinstance(module_key, str) else "",
+        module_name=module_name if isinstance(module_name, str) else "",
+        cases=parsed,
+    )
 
 
 @app.post("/v1/chat/completion", response_model=ChatCompletionResponse)
@@ -186,6 +261,11 @@ async def chat_completion(body: ChatCompletionRequest) -> ChatCompletionResponse
             latest_test_suite=latest_suite,
             prior_intent=body.intent,
             focus_paths=body.focus_paths,
+            existing_suites=[suite.model_dump() for suite in body.existing_suites],
+            pending_action=body.pending_action,
+            pending_suite_id=body.pending_suite_id,
+            active_suite_id=body.active_suite_id,
+            prd=body.prd.model_dump() if body.prd else None,
         )
     except TursorConfigError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -204,4 +284,10 @@ async def chat_completion(body: ChatCompletionRequest) -> ChatCompletionResponse
         focus_paths=[
             path for path in result.get("focus_paths") or [] if isinstance(path, str)
         ],
+        reuse_suite_id=str(result.get("reuse_suite_id") or ""),
+        prd=PrdResult.model_validate(result["prd"]) if result.get("prd") else None,
+        pending_action=str(result.get("pending_action") or ""),
+        pending_suite_id=str(result.get("pending_suite_id") or ""),
+        suite_check=result.get("suite_check"),
+        suite_fingerprint=str(result.get("suite_fingerprint") or ""),
     )
