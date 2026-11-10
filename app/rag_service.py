@@ -26,8 +26,16 @@ def search_workspace(
     top_k: int = 100,
 ) -> list[dict[str, str | int | float]]:
     cfg = load_tursor_config(Path(workspace_path))
-    chunks = load_stored_chunks(cfg.embeddings_path)
-    if not chunks:
+    return search_chunks(load_stored_chunks(cfg.embeddings_path), query, top_k=top_k)
+
+
+def search_chunks(
+    chunks: list[StoredChunkRecord],
+    query: str,
+    *,
+    top_k: int = 100,
+) -> list[dict[str, str | int | float]]:
+    if not chunks or not query.strip():
         return []
 
     query_vec = embed_texts([query.strip()])

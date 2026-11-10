@@ -1,4 +1,5 @@
 import json
+import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -6,6 +7,13 @@ from typing import Any
 
 from app.chunking import TextChunk
 from app.embedder import model_name
+
+
+def write_atomic(path: Path, text: str) -> None:
+    """Replace a file in one step, so a reader sees the old file or the new one."""
+    partial = path.with_name(f"{path.name}.tmp")
+    partial.write_text(text, encoding="utf-8")
+    os.replace(partial, path)
 
 
 @dataclass(frozen=True)
@@ -116,13 +124,11 @@ def write_embeddings(
             for rel_path, fp in sorted(file_fingerprints.items())
         },
     }
-    (embeddings_dir / "manifest.json").write_text(
-        json.dumps(manifest, indent=2),
-        encoding="utf-8",
-    )
-
+    # Chat keeps reading the index while it is rebuilt after a file change, so each
+    # file is written beside the old one and swapped in whole; chunks before manifest.
     chunks_path = embeddings_dir / "chunks.jsonl"
-    with chunks_path.open("w", encoding="utf-8") as out:
+    partial = chunks_path.with_name(f"{chunks_path.name}.tmp")
+    with partial.open("w", encoding="utf-8") as out:
         for chunk, vector in zip(chunks, vectors, strict=True):
             record = {
                 "path": chunk.relative_path,
@@ -134,3 +140,5 @@ def write_embeddings(
             }
             out.write(json.dumps(record, ensure_ascii=False))
             out.write("\n")
+    os.replace(partial, chunks_path)
+    write_atomic(embeddings_dir / "manifest.json", json.dumps(manifest, indent=2))
